@@ -1,257 +1,248 @@
-package com.appleframework.async.template; 
-
-import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
-
-import org.springframework.util.Assert;
+package com.appleframework.async.template;
 
 import com.appleframework.async.constant.AsyncConstant;
-import com.appleframework.async.core.AsyncExecutor;
-import com.appleframework.async.core.AsyncFuture;
-import com.appleframework.async.core.AsyncFutureCallback;
-import com.appleframework.async.core.AsyncTaskFuture;
+import com.appleframework.async.core.*;
 import com.appleframework.async.exception.AsyncException;
-import com.appleframework.async.pool.AsyncFutureTask;
-import com.appleframework.async.pool.AsyncPoolCallable;
-import com.appleframework.async.pool.AsyncRunnable;
 import com.appleframework.async.proxy.AsyncMethodProxy;
 import com.appleframework.async.proxy.AsyncProxy;
 import com.appleframework.async.proxy.AsyncResultProxy;
 import com.appleframework.async.util.ReflectionHelper;
+import com.appleframework.async.util.ValidationUtils;
+import org.springframework.util.CollectionUtils;
+
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * <p>
- * 
+ * <p>
  * 编程式异步调用模板
  *
  * </p>
- * @author	woter 
- * @date	2016-3-31 下午4:27:27
- * @version      
+ *
+ * @author woter
+ * @date 2016-3-31 下午4:27:27
  */
 @SuppressWarnings("all")
 public class AsyncTemplate {
-    
+
     private static AsyncProxy cglibProxy = new AsyncMethodProxy();
-    
-    public enum ProxyType{
-	CGLIB
+
+    public enum ProxyType {
+        CGLIB
     }
-    
+
     /**
-     * 
      * <p>
-     * 
-     * 获取代理方式：</br>
-     * ProxyType.CGLIB 返回Cglib代理
-     * 
+     * <p>
+     * 获取代理方式：</br> ProxyType.SPRING 返回Spring Aop代理</br> ProxyType.CGLIB
+     * 返回Cglib代理
+     *
      * </p>
+     *
      * @param type
      * @return
-     *  
-     * @author	woter 
-     * @date	2016-4-14 上午10:42:37
+     * @author woter
+     * @date 2016-4-14 上午10:42:37
      * @version
      */
-    public static AsyncProxy getAsyncProxy(ProxyType type){
-	return cglibProxy;
+    public static AsyncProxy getAsyncProxy(ProxyType type) {
+        return cglibProxy;
     }
-    
+
     /**
-     * 
      * <p>
-     * 
+     * <p>
      * 构建代理类</br>
-     * 
+     *
      * </p>
-     * @param t  需要被代理的类
-     * @return T 必须带有返回参数且不支持void,array及Integer,Long,String,Boolean等Final修饰类</br>
-     *  如果需要返回以上类型，可以创建对象包装；如：{@linkplain com.appleframework.async.bean.AsyncResult}
-     *  
-     * @author	woter 
-     * @date	2016-4-1 下午12:23:45
+     *
+     * @param t 需要被代理的类
+     * @return T
+     * 必须带有返回参数且不支持Void,Array及Integer,Long,String,Boolean等Final修饰类</br>
+     * 如果需要返回以上类型，可以创建对象包装；如：
+     * {@linkplain com.appleframework.async.bean.AsyncResult}
+     * @author woter
+     * @date 2016-4-1 下午12:23:45
      * @version
      */
     public static <T> T buildProxy(T t) {
-	return buildProxy(t,0);
+        return buildProxy(t, 0);
     }
-    
+
     /**
-     * 
      * <p>
-     * 
+     * <p>
      * 构建代理类
      *
      * </p>
-     * @param t 需要被代理的类
+     *
+     * @param t       需要被代理的类
      * @param timeout 超时时间（单位：毫秒）
-     * @return T 必须带有返回参数且不支持void,array及Integer,Long,String,Boolean等Final修饰类</br>
-     *  如果需要返回以上类型，可以创建对象包装；如：{@linkplain com.appleframework.async.bean.AsyncResult}
-     *  
-     * @author	woter 
-     * @date	2016-4-14 上午10:04:58
+     * @return T
+     * 必须带有返回参数且不支持Void,Array及Integer,Long,String,Boolean等Final修饰类</br>
+     * 如果需要返回以上类型，可以创建对象包装；如：
+     * {@linkplain com.appleframework.async.bean.AsyncResult}
+     * @author woter
+     * @date 2016-4-14 上午10:04:58
      * @version
      */
     public static <T> T buildProxy(T t, long timeout) {
-	return (T)getAsyncProxy(ProxyType.CGLIB).buildProxy(t, timeout,true);
+        return (T) getAsyncProxy(ProxyType.CGLIB).buildProxy(t, timeout, true);
     }
-    
-    
-    
-    
+
     /**
-     * 
      * <p>
-     * 
+     * <p>
      * 构建代理类
      *
      * </p>
-     * @param T 需要被代理的类
+     *
+     * @param T         需要被代理的类
      * @param proxyType 代理类型
-     * @return T 必须带有返回参数且不支持void,array及Integer,Long,String,Boolean等Final修饰类</br>
-     *  如果需要返回以上类型，可以创建对象包装；如：{@linkplain com.appleframework.async.bean.AsyncResult}
-     *  
-     * @author	woter 
-     * @date	2016-4-14 上午10:06:19
+     * @return T
+     * 必须带有返回参数且不支持Void,Array及Integer,Long,String,Boolean等Final修饰类</br>
+     * 如果需要返回以上类型，可以创建对象包装；如：
+     * {@linkplain com.appleframework.async.bean.AsyncResult}
+     * @author woter
+     * @date 2016-4-14 上午10:06:19
      * @version
      */
-    public static <T> T buildProxy(T t,ProxyType proxyType) {
-	return (T)getAsyncProxy(proxyType).buildProxy(t, AsyncConstant.ASYNC_DEFAULT_TIME_OUT,true);
+    public static <T> T buildProxy(T t, ProxyType proxyType) {
+        return buildProxy(t, AsyncConstant.ASYNC_DEFAULT_TIME_OUT, proxyType);
     }
-    
+
     /**
-     * 
      * <p>
-     * 
+     * <p>
      * 构建代理类
      *
      * </p>
-     * @param T 需要被代理的类
-     * @param timeout 超时时间（单位：毫秒）
+     *
+     * @param T         需要被代理的类
+     * @param timeout   超时时间（单位：毫秒）
      * @param proxyType 代理类型
-     * @return T 必须带有返回参数且不支持void,array及Integer,Long,String,Boolean等Final修饰类</br>
-     *  如果需要返回以上类型，可以创建对象包装；如：{@linkplain com.appleframework.async.bean.AsyncResult}
-     *  
-     * @author	woter 
-     * @date	2016-4-14 上午10:47:05
+     * @return T
+     * 必须带有返回参数且不支持Void,Array及Integer,Long,String,Boolean等Final修饰类</br>
+     * 如果需要返回以上类型，可以创建对象包装；如：
+     * {@linkplain com.appleframework.async.bean.AsyncResult}
+     * @author woter
+     * @date 2016-4-14 上午10:47:05
      * @version
      */
-    public static <T> T buildProxy(T t,long timeout,ProxyType proxyType) {
-	return (T)getAsyncProxy(proxyType).buildProxy(t, timeout,true);
+    public static <T> T buildProxy(T t, long timeout, ProxyType proxyType) {
+        return (T) getAsyncProxy(proxyType).buildProxy(t, timeout, true);
     }
-    
+
     /**
-     * 
      * <p>
-     * 
-     * 异步执行 AsyncCallback.doAsync方法
+     * <p>
+     * 异步执行AsyncCallable.doAsync
      *
      * </p>
-     * @param AsyncCallback<T> 需要实现的接口
-     * @return T 必须带有返回参数且不支持void,array及Integer,Long,String,Boolean等Final修饰类</br>
-     *  如果需要返回以上类型，可以创建对象包装；如：{@linkplain com.appleframework.async.bean.AsyncResult}
-     *  
-     * @author	woter 
-     * @date	2016-4-14 上午10:08:21
+     *
+     * @param 实现AsyncCallable接口
+     * @param callable
+     * @author woter
+     * @date 2016-7-28 下午2:34:03
      * @version
      */
-    public static <T> T execute(AsyncFuture<T> asyncFuture){
-	return execute(asyncFuture,AsyncConstant.ASYNC_DEFAULT_TIME_OUT);
+    public static void execute(AsyncCallable<Void> callable) {
+        AsyncExecutor.execute(callable);
     }
-    
+
     /**
-     * 
      * <p>
-     * 
-     * 异步执行 AsyncCallback.doAsync方法
+     * <p>
+     * 异步执行 AsyncCallable.doAsync方法
      *
      * </p>
-     * @param AsyncCallback<T> 需要实现的接口
-     * @param timeout 执行超时时间(单位：毫秒)
-     * @return T 必须带有返回参数且不支持void,array及Integer,Long,String,Boolean等Final修饰类</br>
-     *  如果需要返回以上类型，可以创建对象包装；如：{@linkplain com.appleframework.async.bean.AsyncResult}
-     *  
-     * @author	woter 
-     * @date	2016-4-14 上午10:35:48
+     *
+     * @param AsyncCallable<T> 需要实现的接口
+     * @return T
+     * 必须带有返回参数且不支持Void,Array及Integer,Long,String,Boolean等Final修饰类</br>
+     * 如果需要返回以上类型，可以创建对象包装；如：
+     * {@linkplain com.appleframework.async.bean.AsyncResult}
+     * @author woter
+     * @date 2016-4-14 上午10:08:21
      * @version
      */
-    public static <T> T execute(AsyncFuture<T> asyncFuture,long timeout){
-	Type type = asyncFuture.getClass().getGenericInterfaces()[0];
+    public static <T> T submit(AsyncCallable<T> callable) {
+        Type type = callable.getClass().getGenericSuperclass();
         if (!(type instanceof ParameterizedType)) {
-            throw new AsyncException("you should specify AsyncCallback<T> for T type");
+            // 未指定AsyncCallback的泛型信息
+            throw new AsyncException("must be specify AsyncCallable<T> for T type");
         }
-        Class returnClass = (Class) ReflectionHelper.getGenericClass((ParameterizedType) type, 0);
-        return execute(asyncFuture,returnClass,timeout);
+        Class<?> returnClass = ReflectionHelper.getGenericClass((ParameterizedType) type, 0);
+        return submit(callable, returnClass, callable.timeout());
     }
-    
+
     /**
-     * 
      * <p>
-     * 
-     * 异步执行AsyncRunnable.doAsync
+     * <p>
+     * 异步执行AsyncCallable.doAsync；并且回调AsyncFutureCallback
      *
      * </p>
-     * @param runable 实现AsyncRunnable接口
-     *  
-     * @author	woter 
-     * @date	2016-7-28 下午2:34:03
-     * @version
-     */
-    public static void execute(AsyncRunnable runable){
-    	AsyncExecutor.submit(runable);
-    }
-    
-    /**
-     * 
-     * <p>
-     * 
-     * 异步执行AsyncTask.doAsync；并且回调AsyncFutureCallback
      *
-     * </p>
-     * @param asyncFutrue
+     * @param asyncCallable
      * @param asyncFutureCallback
-     *  
-     * @author	woter 
-     * @date	2016-8-1 下午5:20:22
+     * @author woter
+     * @date 2016-8-1 下午5:20:22
      * @version
      */
-    public static <T> void execute(final AsyncTaskFuture<T> asyncFutrue,AsyncFutureCallback<T> asyncFutureCallback){
-    	
-    	AsyncExecutor.submit(new AsyncPoolCallable<T>() {
-			@Override
-			public T call() throws Exception {
-				return asyncFutrue.doAsync();
-			}
-		}, asyncFutureCallback);
+    public static <T> void submit(AsyncCallable<T> callable, AsyncFutureCallback<T> asyncFutureCallback) {
+
+        AsyncExecutor.submit(callable, asyncFutureCallback);
     }
-    
-    private static <T> T execute(final AsyncFuture<T> callback,Class<?> returnClass,long timeout){
-	Assert.notNull(callback);
-	Assert.notNull(returnClass);
-	if (Void.TYPE.isAssignableFrom(returnClass)) {
-            return callback.doAsync();
-        } else if (!Modifier.isPublic(returnClass.getModifiers())) {
-            return callback.doAsync();
-        } else if (Modifier.isFinal(returnClass.getModifiers())) {
-            return callback.doAsync();
-        } else if (returnClass.isPrimitive() || returnClass.isArray()) {
-            return callback.doAsync();
-        } else if (returnClass == Object.class) {
-            return callback.doAsync();
-        } else {
-            AsyncFutureTask<T> future = AsyncExecutor.submit(new AsyncPoolCallable<T>() {
-        	public T call() throws Exception {
-                    try {
-                        return callback.doAsync();
-                    } catch (Throwable e) {
-                        throw new AsyncException("future invoke error", e);
-                    }
-                }
-            });
-            return (T)new AsyncResultProxy(future).buildProxy(returnClass, timeout,true);
+
+    /**
+     * 遍历List 异步执行AsyncFunction.doAsync；
+     *
+     * @param list
+     * @param function 需要实现的抽象类
+     * @return List<E>
+     * E 必须带有返回参数且不支持Void,Array及Integer,Long,String,Boolean等Final修饰类</br>
+     * 如果需要返回以上类型，可以创建对象包装；如：
+     * {@linkplain com.appleframework.async.bean.AsyncResult}
+     * @author woter
+     * @date 2017-7-17 下午5:50:55
+     * @version
+     */
+    public static <T, E> List<E> submit(List<T> list, final AsyncFunction<T, E> function) {
+        List<E> asyncs = new ArrayList<E>();
+        if (CollectionUtils.isEmpty(list)) {
+            return asyncs;
         }
+        if (function == null) {
+            return asyncs;
+        }
+
+        Class<?> returnClass = ReflectionHelper.getGenericClass(function.getClass(), 1);
+        for (final T t : list) {
+            asyncs.add(submit(new AsyncCallable<E>() {
+                public E doAsync() {
+                    return function.doAsync(t);
+                }
+            }, returnClass, function.timeout()));
+        }
+        return asyncs;
+    }
+
+    private static <T> T submit(AsyncCallable<T> callback, Class<?> returnClass, long timeout) {
+        ValidationUtils.checkNotNull(callback);
+        ValidationUtils.checkNotNull(returnClass, "must be specify return type");
+
+        if (!ReflectionHelper.canProxy(returnClass)) {
+            return callback.doAsync();
+        }
+        if (Void.TYPE.isAssignableFrom(returnClass)) {
+            AsyncExecutor.execute(callback);
+            return null;
+        }
+
+        AsyncFutureTask<T> future = AsyncExecutor.submit(callback);
+        return (T) new AsyncResultProxy(future).buildProxy(returnClass, timeout, true);
     }
 }
-
- 

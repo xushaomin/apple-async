@@ -1,42 +1,43 @@
-package com.appleframework.async.cache; 
+package com.appleframework.async.cache;
+
+import com.appleframework.async.annotation.AppleAsync;
+import com.appleframework.async.bean.AsyncMethod;
+import com.appleframework.async.bean.AsyncRetry;
+import com.appleframework.async.util.CommonUtil;
+import com.appleframework.async.util.ReflectionHelper;
 
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import com.appleframework.async.annotation.AppleAsync;
-import com.appleframework.async.bean.AsyncMethod;
-import com.appleframework.async.util.CommonUtil;
-import com.appleframework.async.util.ReflectionHelper;
-
 /**
  * <p>
- * 
+ *
  *
  *
  * </p>
- * @author	woter 
- * @date	2016-3-23 下午6:03:39
- * @version      
+ *
+ * @author woter
+ * @date 2016-3-23 下午6:03:39
  */
-public class AsyncProxyCache {
-    
-    private static ConcurrentMap<String,Class<?>> proxyClasss = new ConcurrentHashMap<String,Class<?>>(100);
-    private static ConcurrentMap<String,AsyncMethod> proxyMethods = new ConcurrentHashMap<String,AsyncMethod>(1000);
-    
-    
+public final class AsyncProxyCache {
+
+    private static ConcurrentMap<String, Class<?>> proxyClasss = new ConcurrentHashMap<String, Class<?>>(100);
+    private static ConcurrentMap<String, Object> nativeObjects = new ConcurrentHashMap<String, Object>(100);
+    private static ConcurrentMap<String, AsyncMethod> proxyMethods = new ConcurrentHashMap<String, AsyncMethod>(500);
+
+
     /**
-     * 
      * <p>
-     * 
+     * <p>
      * 如果存在对应的key的ProxyClass就返回，没有则返回null
      *
      * </p>
+     *
      * @param key
      * @return
-     *  
-     * @author	hz15041240 
-     * @date	2016-3-23 下午6:07:48
+     * @author woter
+     * @date 2016-3-23 下午6:07:48
      * @version
      */
     public static Class<?> getProxyClass(String key) {
@@ -44,48 +45,63 @@ public class AsyncProxyCache {
     }
 
     /**
-     * 
      * <p>
-     * 
+     * <p>
      * 注册对应的proxyClass到Map
      *
      * </p>
+     *
      * @param key
      * @param proxyClass
-     *  
-     * @author	hz15041240 
-     * @date	2016-3-23 下午6:07:57
+     * @author woter
+     * @date 2016-3-23 下午6:07:57
      * @version
      */
     public static void registerProxy(String key, Class<?> proxyClass) {
-	proxyClasss.putIfAbsent(key, proxyClass);
+        proxyClasss.putIfAbsent(key, proxyClass);
     }
-    
-    public static void putAsyncMethod(String key, AsyncMethod asyncMethod){
-	proxyMethods.putIfAbsent(key, asyncMethod);
+
+    public static void putAsyncMethod(String key, AsyncMethod asyncMethod) {
+        proxyMethods.putIfAbsent(key, asyncMethod);
     }
-    
-    public static void registerMethod(Object bean, long timeout) {
-	Method[] methods = bean.getClass().getDeclaredMethods();
-	if (methods == null || methods.length == 0) {
-	    return;
-	}
-	for (Method method : methods) {
-	    AppleAsync annotation = ReflectionHelper.findAsyncAnnatation(bean, method);
-	    if(annotation != null){
-		AsyncMethod asyncMethod = new AsyncMethod(bean, method, annotation.timeout());
-		putAsyncMethod(CommonUtil.buildkey(bean, method), asyncMethod);
-	    }
-	}
+
+    public static void registerMethod(Object bean, long timeout, boolean all) {
+        Method[] methods = CommonUtil.getClass(bean).getDeclaredMethods();
+        if (methods == null || methods.length == 0) {
+            return;
+        }
+
+        if (!all) {
+            nativeObjects.putIfAbsent(CommonUtil.getClass(bean).getName(), bean);
+        } else {
+            Object nativeObject = nativeObjects.get(CommonUtil.getClass(bean).getName());
+            if (nativeObject != null) bean = nativeObject;
+        }
+
+        for (Method method : methods) {
+            if (!all) {
+                AppleAsync annotation = ReflectionHelper.findAsyncAnnatation(bean, method);
+                if (annotation != null) {
+                    AsyncMethod asyncMethod = new AsyncMethod(bean, method, annotation.timeout(), new AsyncRetry(annotation.maxAttemps(), annotation.exceptions()));
+                    putAsyncMethod(CommonUtil.buildkey(bean, method), asyncMethod);
+                }
+            } else {
+                Class<?> returnClass = method.getReturnType();
+                if (Void.TYPE.isAssignableFrom(returnClass) || ReflectionHelper.canProxy(returnClass)) {
+                    AsyncMethod asyncMethod = new AsyncMethod(bean, method, timeout, new AsyncRetry(0, Throwable.class));
+                    putAsyncMethod(CommonUtil.buildkey(bean, method), asyncMethod);
+                }
+            }
+        }
     }
-    
-    public static boolean containMethod(String key){
-	return proxyMethods.containsKey(key);
+
+    public static boolean containMethod(String key) {
+        return proxyMethods.containsKey(key);
     }
-    
-    public static AsyncMethod getAsyncMethod(String key){
-	return proxyMethods.get(key);
+
+    public static AsyncMethod getAsyncMethod(String key) {
+        return proxyMethods.get(key);
     }
-    
+
 }
  

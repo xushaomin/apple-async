@@ -1,118 +1,91 @@
 package com.appleframework.async.proxy;
 
-import java.lang.reflect.Method;
-import java.util.Map;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.appleframework.async.bean.AsyncMethod;
+import com.appleframework.async.cache.AsyncProxyCache;
+import com.appleframework.async.core.AsyncExecutor;
+import com.appleframework.async.core.AsyncFutureCallable;
+import com.appleframework.async.core.AsyncFutureTask;
+import com.appleframework.async.exception.AsyncException;
+import com.appleframework.async.util.CommonUtil;
+import com.appleframework.async.util.ReflectionHelper;
 import org.springframework.cglib.proxy.MethodInterceptor;
 import org.springframework.cglib.proxy.MethodProxy;
 
-import com.appleframework.async.bean.AsyncMethod;
-import com.appleframework.async.cache.AsyncProxyCache;
-import com.appleframework.async.constant.AsyncConstant;
-import com.appleframework.async.core.AsyncExecutor;
-import com.appleframework.async.exception.AsyncException;
-import com.appleframework.async.pool.AsyncFutureTask;
-import com.appleframework.async.pool.AsyncPoolCallable;
-import com.appleframework.async.pool.AsyncRunnable;
-import com.appleframework.async.template.AsyncTemplate;
-import com.appleframework.async.util.CommonUtil;
-import com.appleframework.async.util.ReflectionHelper;
+import java.lang.reflect.Method;
+import java.util.concurrent.TimeoutException;
 
 /**
  * <p>
- * 
- * 
- * 
+ *
+ *
+ *
  * </p>
- * 
+ *
  * @author woter
  * @date 2016-3-23 下午6:13:58
- * @version
  */
 public class AsyncMethodInterceptor implements MethodInterceptor {
 
-    private final static Logger logger = LoggerFactory.getLogger(AsyncMethodInterceptor.class);
-
-    private long timeout;
-
     private Object targetObject;
-    
-    private boolean all;
 
-    public AsyncMethodInterceptor(Object targetObject, long timeout,boolean all) {
-	this.timeout = timeout;
-	this.targetObject = targetObject;
-	this.all = all;
+    public AsyncMethodInterceptor(Object targetObject) {
+
+        this.targetObject = targetObject;
     }
 
     @Override
     public Object intercept(Object obj, Method method, Object[] args, MethodProxy proxy) throws Throwable {
-	if (AsyncConstant.ASYNC_DEFAULT_TRACE_LOG) {
-	    logger.debug("start call obejct:{} method:{}", CommonUtil.getClass(targetObject).getName(), CommonUtil.buildMethod(method));
-	}
-	if (AsyncExecutor.isDestroyed()) {
-	    return ReflectionHelper.invoke(targetObject, args, method);
-	}
-	String key = CommonUtil.buildkey(targetObject, method);
-	if (!all && !AsyncProxyCache.containMethod(key)) {
-	    return ReflectionHelper.invoke(targetObject, args, method);
-	}
 
-	final Object finObj = targetObject;
-	final Object[] finArgs = args;
-	final Method finMethod = method;
+        final String cacheKey = CommonUtil.buildkey(targetObject, method);
 
-	long timeout = this.timeout;
-	
-	Class<?> returnClass = method.getReturnType();
-	if (Void.TYPE.isAssignableFrom(returnClass)) {
-	    AsyncTemplate.execute(new AsyncRunnable() {
-		@Override
-		public void doAsync(Map<String, Object> dataMap) {
-		    try {
-			ReflectionHelper.invoke(finObj, finArgs, finMethod);
-		    } catch (Throwable e) {
-			logger.error("async runnable invoke error", e);
-		    }
-		}
-	    });
-	    return null;
-	}
+        final AsyncMethod asyncMethod = AsyncProxyCache.getAsyncMethod(cacheKey);
 
-	final AsyncMethod asyncMethod = AsyncProxyCache.getAsyncMethod(key);
-	if (asyncMethod != null) {
-	    timeout = asyncMethod.getTimeout();
-	}
-	AsyncFutureTask<Object> future = AsyncExecutor.submit(new AsyncPoolCallable<Object>() {
-	    public Object call() throws Exception {
-		Object object = null;
-		try {
-		    if (asyncMethod != null) {
-			if (AsyncConstant.ASYNC_DEFAULT_TRACE_LOG) {
-			    logger.debug("start async call object:{} asyncMethod:{}", asyncMethod.getObject().getClass().getName(), CommonUtil.buildMethod(asyncMethod.getMethod()));
-			}
-			object = ReflectionHelper.invoke(asyncMethod.getObject(), finArgs, asyncMethod.getMethod());
-			if (AsyncConstant.ASYNC_DEFAULT_TRACE_LOG) {
-			    logger.debug("end async call object:{} asyncMethod:{}", asyncMethod.getObject().getClass().getName(), CommonUtil.buildMethod(asyncMethod.getMethod()));
-			}
-		    } else {
-			if (AsyncConstant.ASYNC_DEFAULT_TRACE_LOG) {
-			    logger.debug("start call object:{} method:{}", finObj.getClass().getName(), CommonUtil.buildMethod(finMethod));
-			}
-			object = ReflectionHelper.invoke(finObj, finArgs, finMethod);
-			if (AsyncConstant.ASYNC_DEFAULT_TRACE_LOG) {
-			    logger.debug("end call object:{} method:{}", finObj.getClass().getName(), CommonUtil.buildMethod(finMethod));
-			}
-		    }
-		    return object;
-		} catch (Throwable e) {
-		    throw new AsyncException("future invoke error", e);
-		}
-	    }
-	});
-	return new AsyncResultProxy(future).buildProxy(returnClass, timeout, true);
+        if (asyncMethod == null || !ReflectionHelper.canProxyInvoke(method)) {
+            return ReflectionHelper.invoke(targetObject, args, method);
+        }
+        if (AsyncExecutor.isDestroyed()) {
+            return ReflectionHelper.invoke(asyncMethod.getObject(), args, method);
+        }
+
+        final Object[] finArgs = args;
+
+        AsyncFutureTask<Object> future = AsyncExecutor.submit(new AsyncFutureCallable<Object>() {
+
+            @Override
+            public Object call() throws Exception {
+                try {
+                    return ReflectionHelper.invoke(asyncMethod.getObject(), finArgs, asyncMethod.getMethod());
+                } catch (Throwable e) {
+                    throw new AsyncException(e);
+                }
+            }
+
+            @Override
+            public int maxAttemps() {
+                return asyncMethod.getRetry().getMaxAttemps();
+            }
+
+            @Override
+            public long timeout() {
+                return asyncMethod.getTimeout();
+            }
+
+            @Override
+            @SuppressWarnings("unchecked")
+            public Class<? extends Throwable>[] exceptions() {
+                return new Class[]{TimeoutException.class};
+            }
+
+            @Override
+            public String cacheKey() {
+                return cacheKey;
+            }
+        });
+        if (asyncMethod.isVoid()) {
+            return null;
+        }
+
+        return new AsyncResultProxy(future).buildProxy(method.getReturnType(), asyncMethod.getTimeout(), true);
 
     }
 }

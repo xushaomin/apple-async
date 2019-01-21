@@ -1,117 +1,182 @@
+/**
+ * Copyright (c) 2006-2016 Hzins Ltd. All Rights Reserved.
+ * <p>
+ * This code is the confidential and proprietary information of
+ * Hzins. You shall not disclose such Confidential Information
+ * and shall use it only in accordance with the terms of the agreements
+ * you entered into with Hzins,http://www.hzins.com.
+ */
 package com.appleframework.async.core;
 
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.RejectedExecutionHandler;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-
+import com.appleframework.async.bean.AsyncMethod;
+import com.appleframework.async.bean.AsyncRetry;
+import com.appleframework.async.cache.AsyncProxyCache;
+import com.appleframework.async.config.AsyncConfigurer;
+import com.appleframework.async.config.DefaultAsyncConfigurer;
+import com.appleframework.async.config.ThreadPoolConfiguration;
+import com.appleframework.async.constant.HandleMode;
+import com.appleframework.async.exception.AsyncException;
+import com.appleframework.async.inject.TransactionBuilder;
+import com.appleframework.async.pool.AsyncTaskThreadPool;
+import com.appleframework.async.pool.NamedThreadFactory;
+import com.appleframework.async.pool.RunnableAround;
+import com.appleframework.async.util.ReflectionHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
-import com.appleframework.async.constant.AsyncConstant;
-import com.appleframework.async.pool.AsyncFutureTask;
-import com.appleframework.async.pool.AsyncPoolCallable;
-import com.appleframework.async.pool.AsyncThreadTaskPool;
-import com.appleframework.async.pool.NamedThreadFactory;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * <p>
- * 
- * 异步线程执行器
- * 
+ *
+ *
  * </p>
- * 
+ *
  * @author woter
  * @date 2016-3-23 上午11:22:17
- * @version
  */
-public class AsyncExecutor {
+public final class AsyncExecutor {
 
     private final static Logger logger = LoggerFactory.getLogger(AsyncExecutor.class);
 
-    private static AsyncThreadTaskPool pool;
+    private static final AtomicBoolean initialized = new AtomicBoolean(false);
+    private static final AtomicBoolean destroyed = new AtomicBoolean(false);
 
-    private static AtomicBoolean isInit = new AtomicBoolean(false);
-    private static AtomicBoolean isDestroyed = new AtomicBoolean(false);
-    
-    enum HandleMode {
-	REJECT, CALLERRUN;
+    private static AsyncTaskThreadPool threadPool;
+    private static TransactionBuilder transactionBuilder;
+
+
+    public static void checkArgument(ThreadPoolConfiguration configuration) {
+        Assert.notNull(configuration, "thread pool configuration propertie not be null");
+        Assert.notNull(configuration.getAllowCoreThreadTimeout(), "configuration propertie async.allowCoreThreadTimeout not be null");
+        Assert.notNull(configuration.getCorePoolSize(), "configuration propertie async.allowCoreThreadTimeout not be null");
+        Assert.notNull(configuration.getKeepAliveTime(), "configuration propertie async.allowCoreThreadTimeout not be null");
+        Assert.notNull(configuration.getMaxAcceptCount(), "configuration propertie async.allowCoreThreadTimeout not be null");
+        Assert.notNull(configuration.getMaxPoolSize(), "configuration propertie async.allowCoreThreadTimeout not be null");
+        Assert.hasText(configuration.getRejectedExecutionHandler(), "configuration propertie async.allowCoreThreadTimeout not be null");
     }
 
-    public static void initPool(Integer corePoolSize, Integer maxPoolSize, Integer maxAcceptCount, String rejectedExecutionHandler, Long keepAliveTime, Boolean allowCoreThreadTimeout) {
-
-	if (!isInit.get()) {
-	    isInit.set(true);
-	    if (corePoolSize == null || corePoolSize <= 0) {
-		corePoolSize = Runtime.getRuntime().availableProcessors() * 4;
-	    }
-	    if (maxPoolSize == null || maxPoolSize <= 0) {
-		maxPoolSize = corePoolSize;
-	    }
-	    if (maxAcceptCount == null || maxAcceptCount < 0) {
-		maxAcceptCount = (corePoolSize * 2);
-	    }
-	    HandleMode handleMode = HandleMode.CALLERRUN;
-	    if (!StringUtils.isEmpty(rejectedExecutionHandler)) {
-		if ("REJECT".equals(rejectedExecutionHandler)) {
-		    handleMode = HandleMode.REJECT;
-		}
-	    }
-	    if (keepAliveTime == null || keepAliveTime < 0) {
-		keepAliveTime = AsyncConstant.ASYNC_DEFAULT_KEEPALIVETIME;
-	    }
-	    if (allowCoreThreadTimeout == null) {
-		allowCoreThreadTimeout = true;
-	    }
-
-	    RejectedExecutionHandler handler = getRejectedHandler(handleMode);
-	    BlockingQueue<Runnable> queue = createQueue(maxAcceptCount);
-	    pool = new AsyncThreadTaskPool(corePoolSize, maxPoolSize, keepAliveTime, TimeUnit.MILLISECONDS, queue, handler, new NamedThreadFactory());
-	    pool.getThreadPoolExecutor().allowCoreThreadTimeOut(allowCoreThreadTimeout);
-	    logger.info("ThreadPoolExecutor initialize info corePoolSize:{} maxPoolSize:{} maxAcceptCount:{} rejectedExecutionHandler:{}", corePoolSize, maxPoolSize, maxAcceptCount, handleMode);
-	}
+    public static void initializeThreadPool(ThreadPoolConfiguration threadPoolConfiguration) {
+        checkArgument(threadPoolConfiguration);
+        initializeThreadPool(threadPoolConfiguration.getCorePoolSize(), threadPoolConfiguration.getMaxPoolSize(), threadPoolConfiguration.getMaxAcceptCount(),
+                threadPoolConfiguration.getRejectedExecutionHandler(), threadPoolConfiguration.getKeepAliveTime(), threadPoolConfiguration.getAllowCoreThreadTimeout());
     }
 
-    public static <T> AsyncFutureTask<T> submit(AsyncPoolCallable<T> task) {
-	return submit(task,null);
+    private static void initializeThreadPool(Integer corePoolSize, Integer maxPoolSize, Integer maxAcceptCount, String rejectedExecutionHandler,
+                                             Long keepAliveTime, Boolean allowCoreThreadTimeout) {
+
+        if (!initialized.get()) {
+            initialized.set(true);
+            HandleMode handleMode = HandleMode.CALLERRUN;
+            if (StringUtils.hasText(rejectedExecutionHandler)) {
+                if (!HandleMode.REJECT.toString().equals(rejectedExecutionHandler) && !HandleMode.CALLERRUN.toString().equals(rejectedExecutionHandler)) {
+                    throw new IllegalArgumentException("Invalid configuration properties async.rejectedExecutionHandler");
+                }
+                if (HandleMode.REJECT.toString().equals(rejectedExecutionHandler)) {
+                    handleMode = HandleMode.REJECT;
+                }
+            }
+            RejectedExecutionHandler handler = getRejectedHandler(handleMode);
+            BlockingQueue<Runnable> queue = createQueue(maxAcceptCount);
+            threadPool = new AsyncTaskThreadPool(corePoolSize, maxPoolSize, keepAliveTime, TimeUnit.MILLISECONDS, queue, handler, new NamedThreadFactory());
+            threadPool.getThreadPoolExecutor().allowCoreThreadTimeOut(allowCoreThreadTimeout);
+            logger.info("ThreadPoolExecutor initialize info corePoolSize:{} maxPoolSize:{} maxAcceptCount:{} rejectedExecutionHandler:{}", corePoolSize, maxPoolSize, maxAcceptCount, handleMode);
+        }
     }
 
-    public static <T> AsyncFutureTask<T> submit(AsyncPoolCallable<T> task, AsyncFutureCallback<T> callback) {
-	if (!isInit.get()) {
-	    initPool(null, null, null, null, null, null);
-	}
-	return pool.submit(task, callback);
+
+    public static <T> void execute(AsyncCallable<T> task) {
+        submit(task);
     }
 
-    public static void destroy() {
-	if (isInit.get() && (pool != null)) {
-	    pool.destroy();
-	    pool = null;
-	}
+    public static <T> com.appleframework.async.core.AsyncFutureTask<T> submit(com.appleframework.async.core.AsyncFutureCallable<T> callable) {
+        return submit(callable, null);
     }
+
+    public static <T> com.appleframework.async.core.AsyncFutureTask<T> submit(com.appleframework.async.core.AsyncFutureCallable<T> callable, com.appleframework.async.core.AsyncFutureCallback<T> callback) {
+        if (!initialized.get()) {
+            AsyncConfigurer asyncConfigurer = new DefaultAsyncConfigurer();
+            ThreadPoolConfiguration threadPoolConfiguration = new ThreadPoolConfiguration();
+            asyncConfigurer.configureThreadPool(threadPoolConfiguration);
+            initializeThreadPool(threadPoolConfiguration);
+        }
+        AsyncMethod method = buildAsyncMethod(callable);
+        if (callable instanceof com.appleframework.async.core.TransactionCallable) {
+            callable = executeTransaction(callable);
+        }
+        return threadPool.submit(callable, callback, method);
+    }
+
+    public static void destroy() throws Exception {
+        if (initialized.get() && (threadPool != null)) {
+            threadPool.destroy();
+            threadPool = null;
+        }
+    }
+
+    public static <T> AsyncCallable<T> executeTransaction(final com.appleframework.async.core.AsyncFutureCallable<T> callable) {
+        if (transactionBuilder == null) {
+            throw new AsyncException("you should integration spring transaction");
+        }
+        return new AsyncCallable<T>() {
+            @Override
+            public T doAsync() {
+                return transactionBuilder.execute(callable);
+            }
+        };
+    }
+
+    private static <T> AsyncMethod buildAsyncMethod(com.appleframework.async.core.AsyncFutureCallable<T> callable) {
+        if (callable.cacheKey() != null) {
+            AsyncMethod method = AsyncProxyCache.getAsyncMethod(callable.cacheKey());
+            if (method != null) {
+                return method;
+            }
+        }
+        AsyncMethod method = new AsyncMethod(null, null, callable.timeout(), new AsyncRetry(callable.maxAttemps(), callable.exceptions()));
+        Class<?> returnClass = ReflectionHelper.getGenericClass(callable.getClass());
+        if (Void.TYPE.isAssignableFrom(returnClass) || Void.class.equals(returnClass)) {
+            method.setVoid(true);
+        }
+        return method;
+    }
+
 
     private static BlockingQueue<Runnable> createQueue(int acceptCount) {
-
-	if (acceptCount > 0) {
-	    return new LinkedBlockingQueue<Runnable>(acceptCount);
-	} else {
-	    return new SynchronousQueue<Runnable>();
-	}
+        if (acceptCount > 0) {
+            return new LinkedBlockingQueue<Runnable>(acceptCount);
+        } else {
+            return new SynchronousQueue<Runnable>();
+        }
     }
 
     private static RejectedExecutionHandler getRejectedHandler(HandleMode mode) {
-	return HandleMode.REJECT == mode ? new ThreadPoolExecutor.AbortPolicy() : new ThreadPoolExecutor.CallerRunsPolicy();
+        return HandleMode.REJECT == mode ? new ThreadPoolExecutor.AbortPolicy() : new ThreadPoolExecutor.CallerRunsPolicy();
     }
-    
+
     public static boolean isDestroyed() {
-        return isDestroyed.get();
+        return destroyed.get();
     }
 
     public static void setIsDestroyed(boolean isDestroyed) {
-	AsyncExecutor.isDestroyed.set(true);
+        AsyncExecutor.destroyed.set(true);
     }
+
+    public static void setTransactionBuilder(TransactionBuilder transactionBuilder) {
+        AsyncExecutor.transactionBuilder = transactionBuilder;
+    }
+
+    public static void setRunnableAround(RunnableAround runnableAround) {
+        if (threadPool != null) {
+            threadPool.setRunnableAround(runnableAround);
+        }
+    }
+
+    public static AsyncTaskThreadPool getAsyncTaskThreadPool() {
+        return threadPool;
+    }
+
 }
