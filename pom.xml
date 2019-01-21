@@ -4,7 +4,7 @@
 
   <groupId>com.appleframework.async</groupId>
   <artifactId>apple-async</artifactId>
-  <version>0.0.2.RELEASE</version>
+  <version>0.0.3.RELEASE</version>
   <packaging>jar</packaging>
 
   <name>apple-async</name>
