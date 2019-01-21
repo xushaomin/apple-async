@@ -1,34 +1,28 @@
-package com.appleframework.async.util; 
+package com.appleframework.async.util;
 
-import java.lang.reflect.Array;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.GenericArrayType;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
-import java.util.HashMap;
-import java.util.Map;
-
+import com.appleframework.async.annotation.AppleAsync;
+import com.appleframework.async.exception.AsyncException;
 import org.springframework.cglib.core.ReflectUtils;
 import org.springframework.core.annotation.AnnotationUtils;
 
-import com.appleframework.async.annotation.AppleAsync;
+import java.lang.reflect.*;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * <p>
- * 
+ *
  *
  *
  * </p>
- * @author	woter 
- * @date	2016-4-11 下午2:37:14
- * @version      
+ *
+ * @author woter
+ * @date 2016-4-11 下午2:37:14
  */
-@SuppressWarnings("all")
-public class ReflectionHelper {
-    
-    private static final Map primitiveValueMap = new HashMap(16);
+public final class ReflectionHelper {
+
+    private static final Map<Class<?>, Object> primitiveValueMap = new HashMap<Class<?>, Object>(16);
+
     static {
         primitiveValueMap.put(Boolean.class, Boolean.FALSE);
         primitiveValueMap.put(Byte.class, Byte.valueOf((byte) 0));
@@ -48,70 +42,72 @@ public class ReflectionHelper {
         primitiveValueMap.put(long.class, Long.valueOf(0));
 
     }
-    
-    public static Object newInstance(Class type) {
-        Constructor constructor = null;
+
+    public static Object newInstance(Class<?> type) {
+        Constructor<?> constructor = null;
         Object[] constructorArgs = new Object[0];
         try {
-            constructor = type.getConstructor(new Class[] {});
+            constructor = type.getConstructor(new Class[]{});// 先尝试默认的空构造函数
         } catch (NoSuchMethodException e) {
             // ignore
         }
 
-        if (constructor == null) {
-            Constructor[] constructors = type.getConstructors();
+        if (constructor == null) {// 没有默认的构造函数，尝试别的带参数的函数
+            Constructor<?>[] constructors = type.getConstructors();
             if (constructors == null || constructors.length == 0) {
                 throw new UnsupportedOperationException("Class[" + type.getName() + "] has no public constructors");
             }
-            constructor = constructors[getSimpleParamenterTypeIndex(constructors)];
-            Class[] params = constructor.getParameterTypes();
+            constructor = constructors[getSimpleParamenterTypeIndex(constructors)];// 默认取第一个参数
+            Class<?>[] params = constructor.getParameterTypes();
             constructorArgs = new Object[params.length];
             for (int i = 0; i < params.length; i++) {
                 constructorArgs[i] = getDefaultValue(params[i]);
             }
         }
-        
+
         return ReflectUtils.newInstance(constructor, constructorArgs);
     }
-    
-    public static int getSimpleParamenterTypeIndex(Constructor[] constructors){
-	Constructor constructor = null;
-	Class[] params = null;
-	boolean isSimpleTypes;
-	for(int i= 0;i < constructors.length ;i++){
-	    constructor = constructors[i];
-	    params = constructor.getParameterTypes();
-	    if(params.length >0){
-		isSimpleTypes = true;
-		for(int j = 0;j <params.length; j++){
-		    if(primitiveValueMap.get(params[j]) ==null){
-			isSimpleTypes = false;
-			break;
-		    }
-		}
-		if(isSimpleTypes){
-		    return i;
-		}
-	    }else{
-		return i;
-	    }
-	}
-	return 0;
+
+    public static int getSimpleParamenterTypeIndex(Constructor<?>[] constructors) {
+        Constructor<?> constructor = null;
+        Class<?>[] params = null;
+        boolean isSimpleTypes;
+        for (int i = 0; i < constructors.length; i++) {
+            constructor = constructors[i];
+            params = constructor.getParameterTypes();
+            if (params.length > 0) {
+                isSimpleTypes = true;
+                for (int j = 0; j < params.length; j++) {
+                    if (primitiveValueMap.get(params[j]) == null) {
+                        isSimpleTypes = false;
+                        break;
+                    }
+                }
+                if (isSimpleTypes) {
+                    return i;
+                }
+            } else {
+                return i;
+            }
+        }
+        return 0;
     }
-    
-    public static Object getDefaultValue(Class cl) {
-        if (cl.isArray()) {
+
+    public static Object getDefaultValue(Class<?> cl) {
+        if (cl.isArray()) {// 处理数组
             return Array.newInstance(cl.getComponentType(), 0);
-        } else if (cl.isPrimitive() || primitiveValueMap.containsKey(cl)) { 
+        } else if (cl.isPrimitive() || primitiveValueMap.containsKey(cl)) { // 处理原型
             return primitiveValueMap.get(cl);
         } else {
             return null;
         }
     }
-    
-    public static Object invoke(Object finObj,Object[] finArgs,Method method) throws Throwable{
-	try {
-	    return method.invoke(finObj, finArgs);
+
+    public static Object invoke(Object obj, Object[] finArgs, Method method) throws Throwable {
+        if (method == null)
+            return null;
+        try {
+            return method.invoke(obj, finArgs);
         } catch (IllegalAccessException e) {
             throw e;
         } catch (IllegalArgumentException e) {
@@ -120,32 +116,87 @@ public class ReflectionHelper {
             throw e.getTargetException() != null ? e.getTargetException() : e;
         }
     }
-    
+
+    public static Class<?> getGenericClass(Class<?> cls) {
+        return getGenericClass(cls, 0);
+    }
+
+    public static Class<?> getGenericClass(Class<?> cls, int i) {
+        Type type = cls.getGenericSuperclass();
+        if (!(type instanceof ParameterizedType)) {
+            throw new AsyncException("you should specify <?> for type");
+        }
+        return getGenericClass((ParameterizedType) type, i);
+    }
+
     public static Class<?> getGenericClass(ParameterizedType parameterizedType, int i) {
         Object genericClass = parameterizedType.getActualTypeArguments()[i];
-        if (genericClass instanceof ParameterizedType) {
+        if (genericClass instanceof ParameterizedType) { // 处理多级泛型
             return (Class<?>) ((ParameterizedType) genericClass).getRawType();
-        } else if (genericClass instanceof GenericArrayType) {
+        } else if (genericClass instanceof GenericArrayType) { // 处理数组泛型
             return (Class<?>) ((GenericArrayType) genericClass).getGenericComponentType();
+        } else if (genericClass instanceof TypeVariable) { // 处理泛型擦拭对象
+            return (Class<?>) getClass(((TypeVariable<?>) genericClass).getBounds()[0], 0);
         } else {
             return (Class<?>) genericClass;
         }
     }
-    
-    public static AppleAsync findAsyncAnnatation(Object bean, Method method) {
-	AppleAsync classAnnotation = AnnotationUtils.findAnnotation(bean.getClass(), AppleAsync.class);
-	AppleAsync methodAnnotation = AnnotationUtils.findAnnotation(method, AppleAsync.class);
-	if (methodAnnotation != null || classAnnotation != null) {
-	    Class<?> returnClass = method.getReturnType();
-	    if (Void.TYPE.isAssignableFrom(returnClass) || (Modifier.isPublic(returnClass.getModifiers()) && !Modifier.isFinal(returnClass.getModifiers()) 
-		    && !(returnClass.isPrimitive() || returnClass.isArray()) && returnClass != Object.class)) {
-		if (methodAnnotation != null) {
-		    return methodAnnotation;
-		}
-		return classAnnotation;
-	    }
-	}
-	return null;
+
+    private static Class<?> getClass(Type type, int i) {
+        if (type instanceof ParameterizedType) { // 处理泛型类型
+            return getGenericClass((ParameterizedType) type, i);
+        } else if (type instanceof TypeVariable) {
+            return (Class<?>) getClass(((TypeVariable<?>) type).getBounds()[0], 0); // 处理泛型擦拭对象
+        } else { // class本身也是type，强制转型
+            return (Class<?>) type;
+        }
     }
+
+    public static AppleAsync findAsyncAnnatation(Object bean, Method method) {
+        AppleAsync classAnnotation = AnnotationUtils.findAnnotation(bean.getClass(), AppleAsync.class);
+        AppleAsync methodAnnotation = AnnotationUtils.findAnnotation(method, AppleAsync.class);
+        if (methodAnnotation != null || classAnnotation != null) {
+            Class<?> returnClass = method.getReturnType();
+            if (Void.TYPE.isAssignableFrom(returnClass) || canProxy(returnClass)) {
+                return methodAnnotation;
+            }
+            return classAnnotation;
+        }
+        return null;
+    }
+
+    public static boolean canProxy(Class<?> cls) {
+        if (Void.class.equals(cls) || Void.TYPE.isAssignableFrom(cls) || !Modifier.isPublic(cls.getModifiers()) || Modifier.isFinal(cls.getModifiers())
+                || cls.isArray() || cls.isPrimitive() || cls == Object.class) {
+            return false;
+        }
+        return true;
+    }
+
+    public static boolean canProxyInvoke(Method method) {
+        if ("finalize".equals(method.getName())) {
+            return false;
+        }
+        return true;
+    }
+
+    public static boolean isVoid(Method method) {
+        if (method == null)
+            return false;
+        return (Void.TYPE.isAssignableFrom(method.getReturnType()) || Void.class.equals(method.getReturnType()));
+    }
+
+    public static Throwable getThrowableCause(Throwable e) {
+        if (e == null || e.getCause() == null) {
+            return e;
+        } else {
+            Throwable throwable = getThrowableCause(e.getCause());
+            if (throwable == null) {
+                return e;
+            } else {
+                return throwable;
+            }
+        }
+    }
+
 }
- 

@@ -1,32 +1,39 @@
-package com.appleframework.async.pool; 
+package com.appleframework.async.pool;
+
+import com.appleframework.async.constant.AsyncConstant;
 
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.appleframework.async.constant.AsyncConstant;
-
 /**
  * <p>
- * 
+ *
  *
  *
  * </p>
- * @author	woter 
- * @date	2016-3-23 下午2:55:23
- * @version      
+ *
+ * @author woter
+ * @date 2016-3-23 下午2:55:23
  */
-public class NamedThreadFactory implements ThreadFactory{
-    
-    final private String        name;
-    final private boolean       daemon;
-    final private ThreadGroup   group;
+public class NamedThreadFactory implements ThreadFactory {
+
+    final private String name;
+
+    final private boolean daemon;
+
+    final private ThreadGroup group;
+
     final private AtomicInteger threadNumber = new AtomicInteger(1);
 
-    public NamedThreadFactory(){
+    public NamedThreadFactory() {
         this(AsyncConstant.ASYNC_DEFAULT_THREAD_NAME, true);
     }
 
-    public NamedThreadFactory(String name, boolean daemon){
+    public NamedThreadFactory(String name) {
+        this(name, true);
+    }
+
+    public NamedThreadFactory(String name, boolean daemon) {
         this.name = name;
         this.daemon = daemon;
         SecurityManager s = System.getSecurityManager();
@@ -42,4 +49,3 @@ public class NamedThreadFactory implements ThreadFactory{
         return t;
     }
 }
- 
