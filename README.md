@@ -47,6 +47,7 @@ apple-async 是一个基于Spring的异步并行框架；主要包括一下几�
 
 ```<context:component-scan base-package="com.appleframework.async" />``` 或者加上 ```@com.appleframework.async.annotation.EnableAsync```（SpringBoot适用）
 ```@com.appleframework.async.annotation.AppleAsync```（Spring适用）
+
 2、Properties文件添加（注：都非必填，默认框架会自动设置）：
 ```
   #核心线程数(默认CPU核数*4)
