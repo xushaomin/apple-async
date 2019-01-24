@@ -12,7 +12,7 @@
 <dependency>
     <groupId>com.appleframework.async</groupId>
     <artifactId>apple-async</artifactId>
-    <version>0.0.3-RELEASE</version>
+    <version>0.0.3.RELEASE</version>
 </dependency>
 
 ```
