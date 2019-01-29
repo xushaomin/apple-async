@@ -13,7 +13,6 @@ public class AsyncCallbackProcessor {
     private final static Logger logger = LoggerFactory.getLogger(AsyncCallbackProcessor.class);
 
     public static <V> void doCallback(AsyncFutureCallback<V> futureCallback, RetryResult<V> result) {
-
         if (futureCallback != null) {
             try {
                 if (result.getThrowable() != null) {
